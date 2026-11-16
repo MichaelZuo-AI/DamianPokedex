@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#e7474d"><meta name="description" content="Damian 的宝可梦图鉴。像小训练家一样探索宝可梦：看大图、听介绍、找伙伴。"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Damian 的图鉴">
-<title>Damian 的宝可梦图鉴</title><link rel="icon" href="assets/pokeball.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css"><link rel="preload" as="image" href="assets/pikachu.png"><script id="pokedex-boot">(() => {
+<script id="pokedex-boot">(() => {
   let complete = false;
   let watchdog;
   function ready(callback) {
@@ -50,7 +50,8 @@
   watchdog = setTimeout(fail, 20_000);
   boot.data = request();
 })();
-</script><script defer src="app.bundle.js?v=594e617a943a" onerror="window.__pokedexBoot.fail()"></script>
+</script>
+<title>Damian 的宝可梦图鉴</title><link rel="icon" href="assets/pokeball.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css"><link rel="preload" as="image" href="assets/pikachu.png"><script defer src="app.bundle.js?v=594e617a943a" onerror="window.__pokedexBoot.fail()"></script>
 </head>
 <body>
 <a class="skip-link" href="#pokemon-name">跳到宝可梦介绍</a>
