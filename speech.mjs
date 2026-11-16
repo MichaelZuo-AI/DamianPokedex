@@ -1,91 +1,83 @@
 const START_TIMEOUT_MS = 10_000;
+const safeId = value => typeof value === 'string' && /^(?:[1-9]\d*|[a-z][a-z0-9-]*)$/.test(value);
+const safeSource = value => typeof value === 'string' && /^audio\/pokemon-[a-z0-9-]+--[a-z0-9-]+\.mp3$/.test(value);
 
-/**
- * Narration stays synchronous with the caller's click for Safari's user gesture.
- * `active` includes loading; `speaking` is reported only after the native event.
- * An optional clock supplies setTimeout/clearTimeout for deterministic callers.
- */
-export function createNarrator({ synthesis, Utterance, onState = () => {}, clock = globalThis } = {}) {
+/** A form must have its own selected-voice recording; never borrow default biology. */
+export function recordingForSelection(manifest, { id, formId, text } = {}) {
+  if (manifest?.voice !== 'uncle_fu' || !safeId(id) || !safeId(formId)
+    || !manifest.entries || !Object.hasOwn(manifest.entries, `${id}:${formId}`)) return null;
+  const recording = manifest.entries[`${id}:${formId}`];
+  if (recording?.src !== `audio/pokemon-${id}--${formId}.mp3` || typeof recording.text !== 'string') return null;
+  if (recording.pokemonId !== undefined && recording.pokemonId !== id) return null;
+  if (recording.formId !== undefined && recording.formId !== formId) return null;
+  if (recording.voice !== undefined && recording.voice !== 'uncle_fu') return null;
+  if (text !== undefined && recording.text !== text) return null;
+  return recording;
+}
+
+/** Recorded audio only. play() stays inside the original Safari click stack. */
+export function createNarrator({ Audio = globalThis.Audio, onState = () => {}, clock = globalThis } = {}) {
   let generation = 0;
   let current = null;
   let startTimer = null;
 
   function clearStartTimer() {
-    if (startTimer !== null) {
-      clock.clearTimeout(startTimer);
-      startTimer = null;
-    }
+    if (startTimer !== null) { clock.clearTimeout(startTimer); startTimer = null; }
   }
-
+  function release(audio) {
+    if (!audio) return;
+    // Invalidation always precedes native methods, which can dispatch events.
+    try { audio.pause(); } catch { /* Continue releasing a failed media element. */ }
+    try { audio.removeAttribute?.('src'); audio.load?.(); } catch { /* Browsing remains available. */ }
+  }
   function invalidate() {
-    generation += 1;
+    generation++;
+    const audio = current?.audio;
     current = null;
     clearStartTimer();
+    release(audio);
   }
-
   function finish(token, state) {
     if (current?.token !== token) return;
     invalidate();
     onState(state);
   }
-
-  function stop() {
-    // Native cancel may dispatch an error synchronously, so invalidate first.
-    invalidate();
-    try {
-      synthesis?.cancel?.();
-      onState('idle');
-    } catch {
-      onState('error');
-    }
+  function loading(token) {
+    if (current?.token !== token) return;
+    clearStartTimer();
+    startTimer = clock.setTimeout(() => finish(token, 'error'), START_TIMEOUT_MS);
+    startTimer?.unref?.();
+    onState('loading');
   }
-
-  function speak({ name, text }) {
+  function stop() {
     invalidate();
-    if (!synthesis || typeof synthesis.speak !== 'function'
-      || typeof synthesis.cancel !== 'function' || typeof synthesis.getVoices !== 'function'
-      || typeof Utterance !== 'function') {
-      onState('unavailable');
-      return false;
-    }
-
+    onState('idle');
+  }
+  function speak(recording) {
+    invalidate();
+    if (!safeSource(recording?.src)) { onState('missing-recording'); return false; }
+    if (typeof Audio !== 'function') { onState('unavailable'); return false; }
     try {
-      synthesis.cancel();
-      const voices = synthesis.getVoices();
-      const language = voice => voice.lang.toLowerCase().replaceAll('_', '-');
-      const voice = voices.find(item => /^zh-(cn|hans)(-|$)/.test(language(item)))
-        ?? voices.find(item => /^zh(-|$)/.test(language(item)));
-      if (voices.length && !voice) {
-        onState('no-chinese-voice');
-        return false;
+      const audio = new Audio(recording.src);
+      if (typeof audio.play !== 'function' || typeof audio.pause !== 'function') {
+        onState('unavailable'); return false;
       }
-
-      const content = [name, text].map(part => String(part ?? '').trim()).filter(Boolean).join('。');
-      const utterance = new Utterance(content);
-      utterance.lang = voice?.lang ?? 'zh-CN';
-      if (voice) utterance.voice = voice;
+      audio.preload = 'auto';
       const token = generation;
-      current = { token, utterance }; // Retain the native utterance until it settles.
-
-      utterance.onstart = () => {
+      current = { token, audio };
+      audio.onplaying = () => {
         if (current?.token !== token) return;
         clearStartTimer();
         onState('speaking');
       };
-      utterance.onend = () => finish(token, 'idle');
-      utterance.onerror = () => finish(token, 'error');
-
-      startTimer = clock.setTimeout(() => {
-        if (current?.token !== token) return;
-        invalidate();
-        try { synthesis.cancel(); } catch { /* Still report the failed start. */ }
-        onState('error');
-      }, START_TIMEOUT_MS);
-      // Node timers must not keep a non-browser process alive.
-      startTimer?.unref?.();
-      onState('loading');
-      // Do not wait for voiceschanged: that would lose the original Safari click.
-      synthesis.speak(utterance);
+      audio.onended = () => finish(token, 'idle');
+      audio.onpause = () => finish(token, 'idle');
+      audio.onerror = () => finish(token, 'error');
+      audio.onwaiting = () => loading(token);
+      loading(token);
+      // No await, fetch or delayed callback before play: preserve user activation.
+      const playing = audio.play();
+      playing?.catch?.(() => finish(token, 'error'));
       return true;
     } catch {
       invalidate();
@@ -93,6 +85,5 @@ export function createNarrator({ synthesis, Utterance, onState = () => {}, clock
       return false;
     }
   }
-
   return { speak, stop, get active() { return current !== null; } };
 }
