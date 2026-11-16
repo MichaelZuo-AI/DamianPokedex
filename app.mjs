@@ -1,3 +1,4 @@
+import { createLanguageController, t, pokemonName, localizePokemon, localizedView, applyDocumentLanguage, EN_TYPES } from './i18n.mjs';
 import { filterPokemon, readFavorites, toggleFavoriteState, FAVORITES_KEY } from './logic.mjs';
 import { detailView } from './presentation.mjs';
 import { catalogPage, adjacentPokemon, restoreSelection, persistSelection, shortDescription, pokemonIdFromHash } from './device-state.mjs';
@@ -12,6 +13,12 @@ let snapshot, byId = new Map(), ordered = [], selection = { id: '25', formId: '2
 let storage, loading = false, toastTimer, composing = false;
 const returnTargets = new WeakMap();
 try { storage = window.localStorage; favorites = readFavorites(storage); } catch { /* Browsing still works without persistent storage. */ }
+const languages = createLanguageController({ storage, onState() { narrator.stop(); clearTimeout(toastTimer); $('#toast').classList.remove('visible'); applyLanguage(); } });
+const lang = () => languages.state.language;
+const tr = (key, values) => t(lang(), key, values);
+const nameOf = pokemon => pokemonName(pokemon, lang());
+const typeNames = () => lang() === 'en' ? EN_TYPES : TYPE_NAMES;
+
 
 function toast(message) {
   const el = $('#toast');
@@ -22,24 +29,33 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove('visible'), 4000);
 }
 const narrator = createNarrator({ synthesis: window.speechSynthesis, Utterance: window.SpeechSynthesisUtterance, onState(state) {
-  const active = state === 'loading' || state === 'speaking';
+  const active = lang() !== 'en' && (state === 'loading' || state === 'speaking');
   $('#speak-button').classList.toggle('is-reading', active);
   $('#speak-button').setAttribute('aria-pressed', String(active));
-  $('#speak-label').textContent = state === 'loading' ? '准备朗读' : state === 'speaking' ? '停止朗读' : '听介绍';
-  const messages = { unavailable: '这个浏览器暂时不能朗读，可以直接阅读介绍。', 'no-chinese-voice': '设备还没有可用的中文语音，可以先阅读介绍。', error: '这次没能朗读出来，请再点一下，或直接阅读介绍。' };
-  if (messages[state]) toast(messages[state]);
+  $('#speak-label').textContent = state === 'loading' && lang() !== 'en' ? tr('audioPreparing') : state === 'speaking' && lang() !== 'en' ? tr('audioStop') : tr('listen');
+  const messages = { unavailable: 'audioUnavailable', 'missing-recording': 'audioMissing', 'no-chinese-voice': 'audioUnavailable', error: 'audioError' };
+  if (lang() !== 'en' && messages[state]) toast(tr(messages[state]));
 } });
+
+function updateNarrationAvailability() {
+  const english = lang() === 'en';
+  $('#speak-button').disabled = !snapshot || english;
+  $('#speak-button').setAttribute('aria-busy', 'false');
+  $('#speak-button').title = english ? tr('englishAudio') : '中文朗读';
+  $('#audio-language-note').hidden = !english;
+  if (!narrator.active) $('#speak-label').textContent = tr('listen');
+}
 
 function selectedProfile() {
   const pokemon = byId.get(selection.id);
-  return { pokemon, view: detailView(pokemon, selection.formId, TYPE_NAMES) };
+  return { basePokemon: pokemon, pokemon: localizePokemon(pokemon, lang(), languages.state.english), view: localizedView(pokemon, selection.formId, lang(), languages.state.english, TYPE_NAMES) };
 }
 function updateFavorite() {
   const active = favorites.has(selection.id);
   $('#favorite-pokemon').classList.toggle('is-favorite', active);
   $('#favorite-pokemon').setAttribute('aria-pressed', String(active));
-  $('#favorite-pokemon').setAttribute('aria-label', `${active ? '取消收藏' : '收藏'}${byId.get(selection.id)?.name || '伙伴'}`);
-  $('#favorite-label').textContent = active ? '已收藏' : '收藏';
+  $('#favorite-pokemon').setAttribute('aria-label', tr(active ? 'unfavoriteAction' : 'favoriteAction', { name: nameOf(byId.get(selection.id)) }));
+  $('#favorite-label').textContent = tr(active ? 'favorited' : 'favorite');
   $('#favorite-count').textContent = favorites.size;
 }
 function mainFamily(pokemon) {
@@ -53,20 +69,23 @@ function mainFamily(pokemon) {
   $('#evolution-preview').innerHTML = preview.length > 1 ? preview.map((node, index) => {
     const partner = byId.get(node.id); if (!partner) return '';
     const arrow = index > 0 && node.fromId === preview[index - 1].id ? '<span class="evolution-arrow" aria-hidden="true">›</span>' : '';
-    return `${arrow}<button type="button" class="evolution-node${partner.id === pokemon.id ? ' current' : ''}" data-select-pokemon="${esc(partner.id)}" aria-label="查看${esc(partner.name)}"${partner.id === pokemon.id ? ' aria-current="true"' : ''}><img src="${imageSrc(partner.image, 160)}" alt="" width="60" height="60"><span>${esc(partner.name)}</span></button>`;
+    return `${arrow}<button type="button" class="evolution-node${partner.id === pokemon.id ? ' current' : ''}" data-select-pokemon="${esc(partner.id)}" aria-label="${esc(tr('view', { name: nameOf(partner) }))}"${partner.id === pokemon.id ? ' aria-current="true"' : ''}><img src="${imageSrc(partner.image, 160)}" alt="" width="60" height="60"><span>${esc(nameOf(partner))}</span></button>`;
   }).join('') : '';
   $('#evolution-note').hidden = family.length > 1;
-  $('#evolution-note').textContent = pokemon.announced ? '进化资料还没有公布。' : '目前没有已知的普通进化。';
+  $('#evolution-note').textContent = tr(pokemon.announced ? 'noEvolutionAnnounced' : 'noEvolution');
   $('#open-family').hidden = family.length <= 3;
 }
 function renderMain({ focus = false } = {}) {
   const { pokemon, view } = selectedProfile();
   selection.formId = view.form.id;
   $('#pokemon-name').textContent = pokemon.name;
-  $('#main-number').textContent = pokemon.number ? `No. ${String(pokemon.number).padStart(3, '0')}` : '全国编号尚未公布';
-  $('#picture-label').textContent = view.variant ? view.form.label : pokemon.announced ? '最新公布的伙伴' : '伙伴资料';
-  $('#type-badges').innerHTML = (view.form.types || pokemon.types).map(t => typeBadge(t)).join('');
-  $('#pokemon-story').textContent = shortDescription(view.description || '中文特点介绍正在补充。');
+  $('#pokemon-name-secondary').hidden = lang() !== 'en';
+  $('#pokemon-name-secondary').textContent = lang() === 'en' ? byId.get(selection.id).name : '';
+  $('#main-number').textContent = pokemon.number ? `No. ${String(pokemon.number).padStart(3, '0')}` : tr('unknownNumber');
+  $('#picture-label').textContent = view.variant ? view.form.label : tr(pokemon.announced ? 'newProfile' : 'profile');
+  $('#type-badges').innerHTML = (view.form.types || pokemon.types).map(t => typeBadge(t, null, lang())).join('');
+  $('#pokemon-story').textContent = lang() === 'en' ? (languages.state.loading ? tr('englishLoading') : languages.state.error ? tr('englishFailed') : view.shortIntro || tr('descriptionMissing')) : shortDescription(view.description || tr('descriptionMissing'));
+  updateNarrationAvailability();
   const image = $('#pokemon-image');
   const src = imageSrc(view.form.image || pokemon.image);
   if (image.getAttribute('src') !== src) {
@@ -79,7 +98,7 @@ function renderMain({ focus = false } = {}) {
   $('#next-pokemon').disabled = !adjacentPokemon(ordered, pokemon.id, 1);
   mainFamily(pokemon); updateFavorite();
   persistSelection(storage, selection);
-  $('#selection-status').textContent = `正在查看${pokemon.name}${view.variant ? `，${view.form.label}` : ''}`;
+  $('#selection-status').textContent = tr('selected', { name: `${pokemon.name}${view.variant ? `, ${view.form.label}` : ''}` });
   if (focus) $('#pokemon-name').focus({ preventScroll: true });
 }
 function showPokemon(id, formId = null, { push = true, focus = true } = {}) {
@@ -103,7 +122,7 @@ function routeSelection() {
       showPokemon(id, formId, { push: false });
     }
   } else if (location.hash !== '#pokemon-name') {
-    if (location.hash.startsWith('#pokemon/')) toast('暂时没找到这位伙伴，先看看这只吧。');
+    if (location.hash.startsWith('#pokemon/')) toast(tr('notFound'));
     history.replaceState({ pokemonId: selection.id, formId: selection.formId }, '', `#pokemon/${selection.id}`);
   }
 }
@@ -132,35 +151,62 @@ function renderCatalog() {
   $('#filter-type').value = catalog.type; $('#filter-generation').value = catalog.generation;
   $('#clear-search').hidden = !catalog.query;
   $$('.catalog-tabs [data-view]').forEach(b => { const active = b.dataset.view === catalog.view; b.classList.toggle('selected', active); b.setAttribute('aria-pressed', String(active)); });
-  $('#catalog-results').textContent = `找到 ${page.total.toLocaleString('zh-CN')} 位伙伴`;
+  $('#catalog-results').textContent = tr('results', { n: page.total.toLocaleString(lang() === 'en' ? 'en-US' : 'zh-CN') });
   $('#catalog-view-note').hidden = catalog.view !== 'latest';
-  $('#catalog-view-note').textContent = '这些是官方新公布的伙伴。还没公布的资料会在之后补充。';
-  $('#catalog-grid').innerHTML = page.items.map(p => `<button type="button" class="catalog-card${p.id === selection.id ? ' selected' : ''}" data-select-pokemon="${esc(p.id)}" aria-label="查看${esc(p.name)}"><span class="image-frame"><img src="${imageSrc(p.image, 240)}" alt="" width="120" height="120" loading="lazy" decoding="async"></span><span>${esc(p.name)}</span>${p.announced ? '<small>新伙伴</small>' : ''}</button>`).join('');
+  $('#catalog-view-note').textContent = tr('latestNote');
+  $('#catalog-grid').innerHTML = page.items.map(p => `<button type="button" class="catalog-card${p.id === selection.id ? ' selected' : ''}" data-select-pokemon="${esc(p.id)}" aria-label="${esc(tr('view', { name: nameOf(p) }))}"><span class="image-frame"><img src="${imageSrc(p.image, 240)}" alt="" width="120" height="120" loading="lazy" decoding="async"></span><span>${esc(nameOf(p))}</span>${lang() === 'en' ? `<small class="chinese-name" lang="zh-CN">${esc(p.name)}</small>` : ''}${p.announced ? `<small>${tr('newBadge')}</small>` : ''}</button>`).join('');
   $('#catalog-empty').hidden = page.total > 0;
   const emptyFavorites = catalog.view === 'favorites' && !favorites.size;
-  $('#empty-title').textContent = emptyFavorites ? '还没有收藏伙伴' : '还没找到这位伙伴';
-  $('#empty-description').textContent = emptyFavorites ? '回到图鉴，点一下爱心，就能收藏喜欢的伙伴。' : '换个名字，或者清除筛选再试试。';
+  $('#empty-title').textContent = tr(emptyFavorites ? 'noFavorites' : 'noResults');
+  $('#empty-description').textContent = tr(emptyFavorites ? 'noFavoritesBody' : 'noResultsBody');
   $('#catalog-pagination').hidden = !page.total;
   $('#catalog-previous').disabled = !page.hasPrevious; $('#catalog-next').disabled = !page.hasNext;
-  $('#catalog-page-label').textContent = page.pageCount ? `${page.page + 1} / ${page.pageCount} 页` : '';
+  $('#catalog-page-label').textContent = page.pageCount ? tr('page', { page: page.page + 1, total: page.pageCount }) : '';
   updateFavorite();
 }
 function resetCatalog() {
   Object.assign(catalog, { query: '', type: 'all', generation: 'all', view: 'all', page: 0 });
   renderCatalog();
 }
-function openForms() {
+function renderForms() {
+  if (lang() === 'en' && !languages.state.english) { $('#form-grid').innerHTML = englishPendingMarkup(); return; }
   const { pokemon } = selectedProfile();
-  $('#form-grid').innerHTML = pokemon.forms.map(f => `<button class="form-card${f.id === selection.formId ? ' selected' : ''}" type="button" data-form="${esc(f.id)}" aria-pressed="${f.id === selection.formId}"><span class="image-frame"><img src="${imageSrc(f.image, 240)}" alt="" width="140" height="140" loading="lazy" decoding="async"></span><span>${esc(f.label)}</span><small>${f.types.map(t => TYPE_NAMES[t]).join(' / ')}</small></button>`).join('');
-  openDialog('form-dialog');
+  $('#form-grid').innerHTML = pokemon.forms.map(f => `<button class="form-card${f.id === selection.formId ? ' selected' : ''}" type="button" data-form="${esc(f.id)}" aria-pressed="${f.id === selection.formId}"><span class="image-frame"><img src="${imageSrc(f.image, 240)}" alt="" width="140" height="140" loading="lazy" decoding="async"></span><span>${esc(f.label)}</span><small>${f.types.map(t => typeNames()[t]).join(' / ')}</small></button>`).join('');
+}
+function openForms() { renderForms(); openDialog('form-dialog'); }
+function renderMore() {
+  const { pokemon, basePokemon, view } = selectedProfile();
+  $('#more-title').textContent = tr('moreTitle', { name: pokemon.name });
+  $('#more-content').innerHTML = lang() === 'en' && !languages.state.english ? englishPendingMarkup() : moreMarkup(basePokemon, view, snapshot, byId, { language: lang(), english: languages.state.english });
+}
+function englishPendingMarkup() {
+  return `<p class="source-note" role="status">${tr(languages.state.error ? 'englishFailed' : 'englishLoading')}</p>${languages.state.error ? `<button class="primary-button" type="button" data-retry-english>${tr('retryEnglish')}</button>` : ''}`;
 }
 function openMore(family = false) {
-  const { pokemon, view } = selectedProfile();
-  $('#more-title').textContent = `${pokemon.name}的更多资料`;
-  $('#more-content').innerHTML = moreMarkup(pokemon, view, snapshot, byId);
-  openDialog('more-dialog');
+  renderMore(); openDialog('more-dialog');
   if (family) $('#full-family')?.scrollIntoView({ block: 'start' });
 }
+function applyLanguage() {
+  const focused = document.activeElement;
+  const focusKey = focused?.dataset?.form ? 'form' : focused?.dataset?.selectPokemon ? 'selectPokemon' : null;
+  const focusValue = focusKey ? focused.dataset[focusKey] : null;
+  const focusRoot = focused?.closest?.('dialog') || document;
+  const scrollPositions = $$('dialog[open] .dialog-content').map(node => [node, node.scrollTop]);
+  applyDocumentLanguage(document, lang());
+  $$('[data-language]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.language === lang())));
+  const typeValue = $('#filter-type').value;
+  $('#filter-type').innerHTML = `<option value="all">${tr('allTypes')}</option>` + Object.entries(typeNames()).map(([id, label]) => `<option value="${id}">${label}</option>`).join('');
+  $('#filter-type').value = typeValue || catalog.type;
+  for (const option of $('#filter-generation').options) option.textContent = option.value === 'all' ? tr('allGenerations') : option.value === '10' ? tr('latest') : tr('generationOption', { n: option.value });
+  $('#language-status').hidden = !languages.state.loading && !languages.state.error;
+  $('#language-status-text').textContent = tr(languages.state.error ? 'englishFailed' : 'englishLoading');
+  $('#retry-english').hidden = !languages.state.error;
+  if (snapshot) { renderMain(); if ($('#catalog-dialog').open) renderCatalog(); if ($('#form-dialog').open) renderForms(); if ($('#more-dialog').open) renderMore(); }
+  for (const [node, top] of scrollPositions) node.scrollTop = top;
+  if (focusKey) $$('[data-form], [data-select-pokemon]', focusRoot).find(node => node.dataset[focusKey] === focusValue)?.focus({ preventScroll: true });
+  updateNarrationAvailability();
+}
+
 async function loadData() {
   if (loading) return; loading = true;
   $('#load-error').hidden = true; $('#device-content').hidden = false;
@@ -198,9 +244,10 @@ $('#next-pokemon').addEventListener('click', () => { const id = adjacentPokemon(
 $('#favorite-pokemon').addEventListener('click', () => {
   const result = toggleFavoriteState(storage, favorites, selection.id); favorites = result.favorites;
   updateFavorite(); if ($('#catalog-dialog').open) renderCatalog();
-  toast(result.saved ? favorites.has(selection.id) ? '已收藏这位伙伴' : '已取消收藏' : '这次收藏已更新；当前浏览器无法保存，关闭后可能丢失。');
+  toast(tr(result.saved ? favorites.has(selection.id) ? 'savedToast' : 'removedToast' : 'unsavedToast'));
 });
 $('#speak-button').addEventListener('click', () => {
+  if (lang() === 'en') return;
   if (narrator.active) narrator.stop();
   else { const { pokemon, view } = selectedProfile(); narrator.speak({ name: pokemon.name, text: shortDescription(view.description) }); }
 });
@@ -223,6 +270,7 @@ for (const [selector, direction] of [['#catalog-previous', -1], ['#catalog-next'
 if (window.__pokedexBoot) window.__pokedexBoot.retry = loadData;
 else $('#retry-load').addEventListener('click', loadData);
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-retry-english]')) { languages.setLanguage('en'); return; }
   const close = e.target.closest('[data-close]'); if (close) { $(`#${close.dataset.close}`).close('cancel'); return; }
   const partner = e.target.closest('[data-select-pokemon]'); if (partner) { const dialog = partner.closest('dialog'); showPokemon(partner.dataset.selectPokemon); if (dialog) closeForSelection(dialog); return; }
   const form = e.target.closest('[data-form]'); if (form) { showPokemon(selection.id, form.dataset.form, { push: false }); closeForSelection($('#form-dialog')); }
@@ -238,9 +286,9 @@ $$('dialog').forEach(dialog => {
 });
 document.addEventListener('error', e => {
   const img = e.target; if (!(img instanceof HTMLImageElement) || img.dataset.failed) return;
-  img.dataset.failed = 'true'; img.src = 'assets/pokeball.svg'; img.classList.add('image-fallback'); img.alt = '图片暂时无法显示';
+  img.dataset.failed = 'true'; img.src = 'assets/pokeball.svg'; img.classList.add('image-fallback'); img.alt = tr('imageError');
   if (img.id === 'pokemon-image') $('#main-image-status').hidden = false;
-  else { const caption = document.createElement('span'); caption.className = 'image-error-caption'; caption.textContent = '图片暂时无法显示'; img.after(caption); }
+  else { const caption = document.createElement('span'); caption.className = 'image-error-caption'; caption.dataset.i18n = 'imageError'; caption.textContent = tr('imageError'); img.after(caption); }
 }, true);
 window.addEventListener('hashchange', routeSelection);
 window.addEventListener('popstate', routeSelection);
@@ -276,4 +324,8 @@ window.addEventListener('pageshow', updateVisibleViewport);
 updateVisibleViewport();
 document.addEventListener('visibilitychange', () => { if (document.hidden) narrator.stop(); });
 window.addEventListener('pagehide', () => narrator.stop());
+$$('[data-language]').forEach(button => button.addEventListener('click', () => { languages.setLanguage(button.dataset.language); }));
+$('#retry-english').addEventListener('click', () => languages.setLanguage('en'));
+applyLanguage();
+languages.setLanguage(languages.state.language);
 loadData();

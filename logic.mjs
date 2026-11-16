@@ -8,6 +8,8 @@ export function filterPokemon(pokemon, {
   query = '', type = 'all', generation = 'all', view = 'all', favorites = [], sort = 'number',
 } = {}) {
   const text = String(query ?? '').trim().toLowerCase();
+  const englishKey = value => String(value ?? '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const englishQuery = !/\p{Script=Han}/u.test(text) && /[a-z]/i.test(text) ? englishKey(text) : '';
   const nationalNumber = /^#?\d+$/.test(text) ? Number(text.replace(/^#/, '')) : null;
   const favoriteIds = favorites instanceof Set ? favorites : new Set(favorites);
   const result = pokemon.filter(entry => {
@@ -17,7 +19,8 @@ export function filterPokemon(pokemon, {
     if (view === 'favorites' && !favoriteIds.has(entry.id)) return false;
     if (!text) return true;
     if (nationalNumber > 0 && hasNumber(entry) && entry.number === nationalNumber) return true;
-    return [entry.name, entry.en, entry.slug].some(value => String(value ?? '').toLowerCase().includes(text));
+    return [entry.name, entry.en, entry.slug].some(value => String(value ?? '').toLowerCase().includes(text))
+      || Boolean(englishQuery && [entry.en, entry.slug].some(value => englishKey(value).includes(englishQuery)));
   });
 
   return result.sort((a, b) => {
