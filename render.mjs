@@ -1,4 +1,5 @@
 import { typeMatchups } from './logic.mjs';
+import { imageSrc } from './images.mjs';
 
 export const TYPES = {
   normal: ['一般', '#727980', '#edf0f2', '●'], fire: ['火', '#db5437', '#fff0e9', '♨'], water: ['水', '#327cc7', '#e9f3ff', '◒'],
@@ -27,7 +28,7 @@ function familyMarkup(pokemon, view, byId) {
   return `<div class="family-grid">${family.map(node => {
     const other = byId.get(node.id), from = byId.get(node.fromId);
     if (!other) return '';
-    return `<button type="button" class="family-card${other.id === pokemon.id ? ' current' : ''}" data-select-pokemon="${escapeHTML(other.id)}" aria-label="查看${escapeHTML(other.name)}"><span class="image-frame"><img src="${escapeHTML(other.image)}" alt="" width="90" height="90" loading="lazy"></span><span>${escapeHTML(other.name)}</span><small>${from ? `由${escapeHTML(from.name)}进化` : '最初的伙伴'}</small>${node.condition && view.showDefaultEvolutionConditions ? `<small>${escapeHTML(node.condition)}</small>` : ''}</button>`;
+    return `<button type="button" class="family-card${other.id === pokemon.id ? ' current' : ''}" data-select-pokemon="${escapeHTML(other.id)}" aria-label="查看${escapeHTML(other.name)}"><span class="image-frame"><img src="${imageSrc(other.image, 160)}" alt="" width="90" height="90" loading="lazy" decoding="async"></span><span>${escapeHTML(other.name)}</span><small>${from ? `由${escapeHTML(from.name)}进化` : '最初的伙伴'}</small>${node.condition && view.showDefaultEvolutionConditions ? `<small>${escapeHTML(node.condition)}</small>` : ''}</button>`;
   }).join('')}</div><p class="matchup-note">这里展示整个种类的家族。地区形态、进化方法和条件可能随游戏版本不同。</p>`;
 }
 function matchupMarkup(types, chart) {

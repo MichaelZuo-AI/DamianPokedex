@@ -3,6 +3,7 @@ import { detailView } from './presentation.mjs';
 import { catalogPage, adjacentPokemon, restoreSelection, persistSelection, shortDescription, pokemonIdFromHash } from './device-state.mjs';
 import { createNarrator } from './speech.mjs';
 import { TYPES, TYPE_NAMES, escapeHTML as esc, typeBadge, moreMarkup } from './render.mjs';
+import { imageSrc } from './images.mjs';
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -52,7 +53,7 @@ function mainFamily(pokemon) {
   $('#evolution-preview').innerHTML = preview.length > 1 ? preview.map((node, index) => {
     const partner = byId.get(node.id); if (!partner) return '';
     const arrow = index > 0 && node.fromId === preview[index - 1].id ? '<span class="evolution-arrow" aria-hidden="true">›</span>' : '';
-    return `${arrow}<button type="button" class="evolution-node${partner.id === pokemon.id ? ' current' : ''}" data-select-pokemon="${esc(partner.id)}" aria-label="查看${esc(partner.name)}"${partner.id === pokemon.id ? ' aria-current="true"' : ''}><img src="${esc(partner.image)}" alt="" width="60" height="60"><span>${esc(partner.name)}</span></button>`;
+    return `${arrow}<button type="button" class="evolution-node${partner.id === pokemon.id ? ' current' : ''}" data-select-pokemon="${esc(partner.id)}" aria-label="查看${esc(partner.name)}"${partner.id === pokemon.id ? ' aria-current="true"' : ''}><img src="${imageSrc(partner.image, 160)}" alt="" width="60" height="60"><span>${esc(partner.name)}</span></button>`;
   }).join('') : '';
   $('#evolution-note').hidden = family.length > 1;
   $('#evolution-note').textContent = pokemon.announced ? '进化资料还没有公布。' : '目前没有已知的普通进化。';
@@ -67,7 +68,7 @@ function renderMain({ focus = false } = {}) {
   $('#type-badges').innerHTML = (view.form.types || pokemon.types).map(t => typeBadge(t)).join('');
   $('#pokemon-story').textContent = shortDescription(view.description || '中文特点介绍正在补充。');
   const image = $('#pokemon-image');
-  const src = pokemon.id === '25' && view.form.id === '25' ? 'assets/pikachu.png' : view.form.image || 'assets/pokeball.svg';
+  const src = imageSrc(view.form.image || pokemon.image);
   if (image.getAttribute('src') !== src) {
     delete image.dataset.failed; image.classList.remove('image-fallback'); $('#main-image-status').hidden = true;
     image.src = src;
@@ -136,7 +137,7 @@ function renderCatalog() {
   $('#catalog-results').textContent = `找到 ${page.total.toLocaleString('zh-CN')} 位伙伴`;
   $('#catalog-view-note').hidden = catalog.view !== 'latest';
   $('#catalog-view-note').textContent = '这些是官方新公布的伙伴。还没公布的资料会在之后补充。';
-  $('#catalog-grid').innerHTML = page.items.map(p => `<button type="button" class="catalog-card${p.id === selection.id ? ' selected' : ''}" data-select-pokemon="${esc(p.id)}" aria-label="查看${esc(p.name)}"><span class="image-frame"><img src="${esc(p.image)}" alt="" width="120" height="120" loading="lazy"></span><span>${esc(p.name)}</span>${p.announced ? '<small>新伙伴</small>' : ''}</button>`).join('');
+  $('#catalog-grid').innerHTML = page.items.map(p => `<button type="button" class="catalog-card${p.id === selection.id ? ' selected' : ''}" data-select-pokemon="${esc(p.id)}" aria-label="查看${esc(p.name)}"><span class="image-frame"><img src="${imageSrc(p.image, 240)}" alt="" width="120" height="120" loading="lazy" decoding="async"></span><span>${esc(p.name)}</span>${p.announced ? '<small>新伙伴</small>' : ''}</button>`).join('');
   $('#catalog-empty').hidden = page.total > 0;
   const emptyFavorites = catalog.view === 'favorites' && !favorites.size;
   $('#empty-title').textContent = emptyFavorites ? '还没有收藏伙伴' : '还没找到这位伙伴';
@@ -152,7 +153,7 @@ function resetCatalog() {
 }
 function openForms() {
   const { pokemon } = selectedProfile();
-  $('#form-grid').innerHTML = pokemon.forms.map(f => `<button class="form-card${f.id === selection.formId ? ' selected' : ''}" type="button" data-form="${esc(f.id)}" aria-pressed="${f.id === selection.formId}"><span class="image-frame"><img src="${esc(f.image)}" alt="" width="140" height="140" loading="lazy"></span><span>${esc(f.label)}</span><small>${f.types.map(t => TYPE_NAMES[t]).join(' / ')}</small></button>`).join('');
+  $('#form-grid').innerHTML = pokemon.forms.map(f => `<button class="form-card${f.id === selection.formId ? ' selected' : ''}" type="button" data-form="${esc(f.id)}" aria-pressed="${f.id === selection.formId}"><span class="image-frame"><img src="${imageSrc(f.image, 240)}" alt="" width="140" height="140" loading="lazy" decoding="async"></span><span>${esc(f.label)}</span><small>${f.types.map(t => TYPE_NAMES[t]).join(' / ')}</small></button>`).join('');
   openDialog('form-dialog');
 }
 function openMore(family = false) {
