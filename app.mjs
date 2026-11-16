@@ -119,12 +119,10 @@ function openDialog(id, focusElement = null) {
   (focusElement || $('.close-button', dialog))?.focus({ preventScroll: true });
 }
 function closeForSelection(dialog) { if (dialog.open) dialog.close('selected'); }
-function openCatalog(searchMode = false) {
+function openCatalog() {
   if (!snapshot) return;
-  if (searchMode) Object.assign(catalog, { type: 'all', generation: 'all', view: 'all', page: 0 });
   renderCatalog();
-  openDialog('catalog-dialog', searchMode ? $('#search') : null);
-  if (searchMode) $('#search').select();
+  openDialog('catalog-dialog');
 }
 function renderCatalog() {
   const result = filterPokemon(snapshot.pokemon, { ...catalog, favorites });
@@ -191,7 +189,6 @@ async function loadData() {
 }
 
 $('#filter-type').insertAdjacentHTML('beforeend', Object.entries(TYPE_NAMES).map(([id, label]) => `<option value="${id}">${label}</option>`).join(''));
-$('#open-search').addEventListener('click', () => openCatalog(true));
 $('#open-catalog').addEventListener('click', () => openCatalog());
 $('#open-more').addEventListener('click', () => openMore());
 $('#open-family').addEventListener('click', () => openMore(true));
