@@ -168,9 +168,13 @@ async function loadData() {
   $('#load-error').hidden = true; $('#device-content').hidden = false;
   $('.device').classList.add('is-loading'); $('.device').setAttribute('aria-busy', 'true');
   try {
-    const response = await fetch('data/pokedex.json');
-    if (!response.ok) throw new Error('Snapshot request failed');
-    const data = await response.json();
+    const boot = window.__pokedexBoot;
+    const pending = boot?.data || boot?.request() || fetch('data/pokedex.runtime.json').then(response => {
+      if (!response.ok) throw new Error('Snapshot request failed');
+      return response.json();
+    });
+    if (boot) boot.data = null;
+    const data = await pending;
     if (!Array.isArray(data?.pokemon) || !data.pokemon.length || !data.meta || !data.typeChart) throw new Error('Invalid snapshot');
     snapshot = data; byId = new Map(data.pokemon.map(p => [p.id, p]));
     ordered = filterPokemon(data.pokemon); favorites = new Set([...favorites].filter(id => byId.has(id)));
@@ -179,6 +183,7 @@ async function loadData() {
     selection = { id, formId: history.state?.pokemonId === id ? history.state.formId : id === restored.id ? restored.formId : null };
     $$('.device button').forEach(b => { b.disabled = false; });
     showPokemon(id, selection.formId, { push: false, focus: false });
+    window.__pokedexBoot?.finish();
   } catch (error) {
     console.error('Pokédex load failed', error);
     $('#device-content').hidden = true; $('#load-error').hidden = false;
@@ -218,7 +223,8 @@ $('#filter-generation').addEventListener('change', e => { catalog.generation = e
 $('.catalog-tabs').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) { Object.assign(catalog, { view: b.dataset.view, query: '', type: 'all', generation: 'all', page: 0 }); renderCatalog(); } });
 $('#reset-catalog').addEventListener('click', resetCatalog); $('#empty-reset').addEventListener('click', resetCatalog);
 for (const [selector, direction] of [['#catalog-previous', -1], ['#catalog-next', 1]]) $(selector).addEventListener('click', () => { catalog.page += direction; renderCatalog(); $('#catalog-grid button')?.focus({ preventScroll: true }); $('#catalog-grid').scrollIntoView({ block: 'nearest' }); });
-$('#retry-load').addEventListener('click', loadData);
+if (window.__pokedexBoot) window.__pokedexBoot.retry = loadData;
+else $('#retry-load').addEventListener('click', loadData);
 document.addEventListener('click', e => {
   const close = e.target.closest('[data-close]'); if (close) { $(`#${close.dataset.close}`).close('cancel'); return; }
   const partner = e.target.closest('[data-select-pokemon]'); if (partner) { const dialog = partner.closest('dialog'); showPokemon(partner.dataset.selectPokemon); if (dialog) closeForSelection(dialog); return; }
