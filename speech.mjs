@@ -1,16 +1,32 @@
+import { RUNTIME_MANIFESTS } from './recording-manifests.mjs';
 const START_TIMEOUT_MS = 10_000;
 const safeId = value => typeof value === 'string' && /^(?:[1-9]\d*|[a-z][a-z0-9-]*)$/.test(value);
-const safeSource = value => typeof value === 'string' && /^audio\/pokemon-[a-z0-9-]+--[a-z0-9-]+\.mp3$/.test(value);
+const safeSource = value => typeof value === 'string' && /^audio\/(?:en\/)?pokemon-[a-z0-9-]+--[a-z0-9-]+\.mp3$/.test(value);
+export const RECORDING_CONFIG = Object.freeze({
+  zh: { voice: 'uncle_fu', path: 'audio', manifest: RUNTIME_MANIFESTS.zh?.url || 'audio/runtime-manifest.json' },
+  en: { voice: 'ryan', path: 'audio/en', manifest: RUNTIME_MANIFESTS.en?.url || 'audio/en/runtime-manifest.json' },
+});
+const matchesLanguage = (manifest, language) => language === 'en' ? manifest?.language === 'en' : manifest?.language === undefined || manifest.language === 'zh' || manifest.language === 'zh-CN';
+export function isRecordingManifest(manifest, language = 'zh') {
+  const config = RECORDING_CONFIG[language];
+  if (!config || manifest?.voice !== config.voice || !matchesLanguage(manifest, language) || manifest.complete !== true
+    || !manifest.entries || typeof manifest.entries !== 'object' || Array.isArray(manifest.entries)) return false;
+  const count = Object.keys(manifest.entries).length;
+  return count > 0 && (manifest.expectedClips === undefined || manifest.expectedClips === count)
+    && (manifest.completedClips === undefined || manifest.completedClips === count);
+}
 
 /** A form must have its own selected-voice recording; never borrow default biology. */
-export function recordingForSelection(manifest, { id, formId, text } = {}) {
-  if (manifest?.voice !== 'uncle_fu' || !safeId(id) || !safeId(formId)
+export function recordingForSelection(manifest, { id, formId, text, language = 'zh' } = {}) {
+  const config = RECORDING_CONFIG[language];
+  if (!config || manifest?.voice !== config.voice || !matchesLanguage(manifest, language) || !safeId(id) || !safeId(formId)
     || !manifest.entries || !Object.hasOwn(manifest.entries, `${id}:${formId}`)) return null;
   const recording = manifest.entries[`${id}:${formId}`];
-  if (recording?.src !== `audio/pokemon-${id}--${formId}.mp3` || typeof recording.text !== 'string') return null;
+  if (recording?.src !== `${config.path}/pokemon-${id}--${formId}.mp3` || typeof recording.text !== 'string') return null;
   if (recording.pokemonId !== undefined && recording.pokemonId !== id) return null;
   if (recording.formId !== undefined && recording.formId !== formId) return null;
-  if (recording.voice !== undefined && recording.voice !== 'uncle_fu') return null;
+  if (recording.voice !== undefined && recording.voice !== config.voice) return null;
+  if (recording.language !== undefined && !matchesLanguage(recording, language)) return null;
   if (text !== undefined && recording.text !== text) return null;
   return recording;
 }

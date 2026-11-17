@@ -1,3 +1,4 @@
+import { createRecordingLibrary, narrationForSelection } from './narration.mjs';
 import { createLanguageController, t, pokemonName, localizePokemon, localizedView, applyDocumentLanguage, EN_TYPES } from './i18n.mjs';
 import { filterPokemon, readFavorites, toggleFavoriteState, FAVORITES_KEY } from './logic.mjs';
 import { detailView } from './presentation.mjs';
@@ -11,9 +12,9 @@ const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const catalog = { query: '', type: 'all', generation: 'all', view: 'all', sort: 'number', page: 0 };
 let snapshot, byId = new Map(), ordered = [], selection = { id: '25', formId: '25' }, favorites = new Set();
 let storage, loading = false, toastTimer, composing = false;
-let narrationManifest = null, narrationRequest = null;
 const returnTargets = new WeakMap();
 try { storage = window.localStorage; favorites = readFavorites(storage); } catch { /* Browsing still works without persistent storage. */ }
+const recordings = createRecordingLibrary({ onState() { updateNarrationAvailability(); } });
 const languages = createLanguageController({ storage, onState() { narrator.stop(); clearTimeout(toastTimer); $('#toast').classList.remove('visible'); applyLanguage(); } });
 const lang = () => languages.state.language;
 const tr = (key, values) => t(lang(), key, values);
@@ -30,45 +31,32 @@ function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove('visible'), 4000);
 }
 const narrator = createNarrator({ Audio: window.Audio, onState(state) {
-  const active = lang() !== 'en' && (state === 'loading' || state === 'speaking');
+  const active = state === 'loading' || state === 'speaking';
   $('#speak-button').classList.toggle('is-reading', active);
   $('#speak-button').setAttribute('aria-pressed', String(active));
-  $('#speak-label').textContent = state === 'loading' && lang() !== 'en' ? tr('audioPreparing') : state === 'speaking' && lang() !== 'en' ? tr('audioStop') : tr('listen');
+  $('#speak-label').textContent = state === 'loading' ? tr('audioPreparing') : state === 'speaking' ? tr('audioStop') : tr('listen');
   const messages = { unavailable: 'audioUnavailable', 'missing-recording': 'audioMissing', error: 'audioError' };
-  if (lang() !== 'en' && messages[state]) toast(tr(messages[state]));
+  if (messages[state]) toast(tr(messages[state]));
 } });
 
-function updateNarrationAvailability() {
-  const english = lang() === 'en';
-  $('#speak-button').disabled = !snapshot || english || Boolean(narrationRequest);
-  $('#speak-button').setAttribute('aria-busy', String(!english && Boolean(narrationRequest)));
-  $('#speak-button').title = tr(english ? 'englishAudio' : 'voice');
-  $('#audio-language-note').hidden = !english;
-  if (!narrator.active) $('#speak-label').textContent = !english && narrationRequest ? tr('recordingsLoading') : tr('listen');
+function currentRecording() {
+  const base = byId.get(selection.id);
+  const request = narrationForSelection(base, selection.formId, lang(), languages.state.english);
+  return request && recordingForSelection(recordings.getState(lang()).manifest, request);
 }
-function loadNarrationManifest() {
-  if (narrationRequest) return narrationRequest;
-  narrationRequest = (async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await fetch('audio/manifest.json', { cache: 'no-cache', signal: controller.signal });
-      if (!response.ok) throw new Error('Narration manifest request failed');
-      const data = await response.json();
-      if (data?.complete !== true || data.voice !== 'uncle_fu' || !data.entries || typeof data.entries !== 'object' || Array.isArray(data.entries)) throw new Error('Invalid narration manifest');
-      narrationManifest = data;
-      return true;
-    } catch (error) {
-      narrationManifest = null;
-      console.warn('Pokédex recordings unavailable', error);
-      return false;
-    } finally {
-      clearTimeout(timeout); narrationRequest = null;
-      updateNarrationAvailability();
-    }
-  })();
-  updateNarrationAvailability();
-  return narrationRequest;
+function updateNarrationAvailability() {
+  const state = recordings.getState(lang());
+  const recording = snapshot && currentRecording();
+  $('#speak-button').disabled = !recording;
+  $('#speak-button').setAttribute('aria-busy', String(state.status === 'loading'));
+  $('#speak-button').title = tr(lang() === 'en' ? 'voiceEnglish' : 'voice');
+  $('#audio-status').hidden = !snapshot || Boolean(recording);
+  $('#audio-language-note').hidden = false;
+  const missingText = lang() === 'en' && !languages.state.english;
+  $('#audio-language-note').textContent = missingText ? tr(languages.state.error ? 'englishFailed' : 'englishLoading')
+    : state.status === 'loading' ? tr('recordingsLoading') : state.status === 'ready' ? tr('audioMissing') : tr(lang() === 'en' ? 'englishAudio' : 'audioLoadError');
+  $('#retry-audio').hidden = missingText || state.status === 'loading' || state.status === 'idle' || Boolean(recording);
+  if (!narrator.active) $('#speak-label').textContent = state.status === 'loading' ? tr('recordingsLoading') : tr('listen');
 }
 
 function selectedProfile() {
@@ -229,8 +217,8 @@ function applyLanguage() {
   if (snapshot) { renderMain(); if ($('#catalog-dialog').open) renderCatalog(); if ($('#form-dialog').open) renderForms(); if ($('#more-dialog').open) renderMore(); }
   for (const [node, top] of scrollPositions) node.scrollTop = top;
   if (focusKey) $$('[data-form], [data-select-pokemon]', focusRoot).find(node => node.dataset[focusKey] === focusValue)?.focus({ preventScroll: true });
+  recordings.setLanguage(lang());
   updateNarrationAvailability();
-  if (snapshot && lang() === 'zh' && !narrationManifest && !narrationRequest) loadNarrationManifest();
 }
 
 async function loadData() {
@@ -253,7 +241,6 @@ async function loadData() {
     selection = { id, formId: history.state?.pokemonId === id ? history.state.formId : id === restored.id ? restored.formId : null };
     $$('.device button').forEach(b => { b.disabled = false; });
     showPokemon(id, selection.formId, { push: false, focus: false });
-    if (lang() === 'zh' && !narrationManifest && !narrationRequest) loadNarrationManifest();
     window.__pokedexBoot?.finish();
   } catch (error) {
     console.error('Pokédex load failed', error);
@@ -274,18 +261,13 @@ $('#favorite-pokemon').addEventListener('click', () => {
   toast(tr(result.saved ? favorites.has(selection.id) ? 'savedToast' : 'removedToast' : 'unsavedToast'));
 });
 $('#speak-button').addEventListener('click', () => {
-  if (lang() === 'en') return;
-  if (narrator.active) narrator.stop();
-  else if (!narrationManifest) {
-    loadNarrationManifest().then(ready => { if (lang() !== 'en') toast(tr(ready ? 'audioReady' : 'audioLoadError')); });
-  } else {
-    const { pokemon, view } = selectedProfile();
-    const text = [pokemon.name, shortDescription(view.description)].filter(Boolean).join('。');
-    const recording = recordingForSelection(narrationManifest, { ...selection, text });
-    // The manifest is already loaded: stay in this click stack for Safari.
-    narrator.speak(recording);
-  }
+  if (narrator.active) { narrator.stop(); return; }
+  const recording = currentRecording();
+  if (!recording) { updateNarrationAvailability(); return; }
+  // Both language manifests are prepared beforehand; preserve the Safari click.
+  narrator.speak(recording);
 });
+$('#retry-audio').addEventListener('click', () => recordings.retry(lang()));
 $('#search').addEventListener('compositionstart', () => { composing = true; });
 $('#search').addEventListener('compositionend', e => { composing = false; catalog.query = e.target.value; catalog.page = 0; renderCatalog(); });
 $('#search').addEventListener('input', e => { catalog.query = e.target.value; catalog.page = 0; if (!composing) renderCatalog(); });
@@ -363,5 +345,4 @@ $$('[data-language]').forEach(button => button.addEventListener('click', () => {
 $('#retry-english').addEventListener('click', () => languages.setLanguage('en'));
 applyLanguage();
 languages.setLanguage(languages.state.language);
-if (lang() !== 'en') loadNarrationManifest();
 loadData();
